@@ -1,11 +1,8 @@
 // widgets/pinch_to_zoom.dart
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-/// PinchToZoom wraps any widget and allows pinch-to-zoom using an Overlay.
-/// When the user starts pinching, a full-screen overlay captures the gesture
-/// and renders the scaled image above all other UI. On release, it springs
-/// back with an elastic animation and the overlay is removed.
 class PinchToZoom extends StatefulWidget {
   final Widget child;
 
@@ -29,6 +26,7 @@ class _PinchToZoomState extends State<PinchToZoom>
   Offset _offset = Offset.zero;
   Offset _baseOffset = Offset.zero;
   bool _isZooming = false;
+  int _pointerCount = 0;
 
   @override
   void initState() {
@@ -46,19 +44,12 @@ class _PinchToZoomState extends State<PinchToZoom>
     super.dispose();
   }
 
-  // ---------------------------------------------------------------------------
-  // Get the widget's bounding rect in global coordinates
-  // ---------------------------------------------------------------------------
   Rect _getGlobalRect() {
     final rb = _key.currentContext?.findRenderObject() as RenderBox?;
     if (rb == null) return Rect.zero;
-    final pos = rb.localToGlobal(Offset.zero);
-    return pos & rb.size;
+    return rb.localToGlobal(Offset.zero) & rb.size;
   }
 
-  // ---------------------------------------------------------------------------
-  // Overlay helpers
-  // ---------------------------------------------------------------------------
   void _insertOverlay(Rect rect) {
     _overlayEntry = OverlayEntry(
       builder: (_) => _ZoomOverlayWidget(
@@ -76,29 +67,19 @@ class _PinchToZoomState extends State<PinchToZoom>
     _overlayEntry = null;
   }
 
-  // ---------------------------------------------------------------------------
-  // Gesture callbacks
-  // ---------------------------------------------------------------------------
   void _onScaleStart(ScaleStartDetails d) {
-    // Only activate on a true pinch (2 fingers)
-    if (d.pointerCount < 2) return;
-
+    if (_pointerCount < 2) return;
     _animController.stop();
     _baseScale = _scale;
     _baseOffset = _offset;
     _isZooming = true;
-
     final rect = _getGlobalRect();
     if (rect == Rect.zero) return;
-
-    if (_overlayEntry == null) {
-      _insertOverlay(rect);
-    }
+    if (_overlayEntry == null) _insertOverlay(rect);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (!_isZooming) return;
-
     _scale = (_baseScale * d.scale).clamp(1.0, 6.0);
     _offset = _baseOffset + d.focalPointDelta;
     _overlayEntry?.markNeedsBuild();
@@ -108,17 +89,13 @@ class _PinchToZoomState extends State<PinchToZoom>
     if (!_isZooming) return;
     _isZooming = false;
 
-    // Animate scale back to 1 and offset back to zero
     final startScale = _scale;
     final startOffset = _offset;
 
     _scaleAnim = Tween<double>(begin: startScale, end: 1.0).animate(
       CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
     );
-    _offsetAnim = Tween<Offset>(
-      begin: startOffset,
-      end: Offset.zero,
-    ).animate(
+    _offsetAnim = Tween<Offset>(begin: startOffset, end: Offset.zero).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
 
@@ -139,15 +116,31 @@ class _PinchToZoomState extends State<PinchToZoom>
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      // Listener ensures we see pointer events even inside a ScrollView
-      onPointerDown: (_) {},
-      child: GestureDetector(
-        onScaleStart: _onScaleStart,
-        onScaleUpdate: _onScaleUpdate,
-        onScaleEnd: _onScaleEnd,
-        // behavior: opaque so the gesture arena picks this up reliably
-        behavior: HitTestBehavior.opaque,
+    return RawGestureDetector(
+      gestures: {
+        _ConditionalScaleRecognizer:
+        GestureRecognizerFactoryWithHandlers<_ConditionalScaleRecognizer>(
+              () => _ConditionalScaleRecognizer(
+            pointerCountProvider: () => _pointerCount,
+          ),
+              (instance) {
+            instance
+              ..onStart = _onScaleStart
+              ..onUpdate = _onScaleUpdate
+              ..onEnd = _onScaleEnd;
+          },
+        ),
+      },
+      // translucent so single-finger swipes fall through to PageView/ScrollView
+      behavior: HitTestBehavior.translucent,
+      child: Listener(
+        onPointerDown: (_) {
+          _pointerCount++;
+          if (_pointerCount >= 2) _animController.stop();
+        },
+        onPointerUp: (_) => _pointerCount = (_pointerCount - 1).clamp(0, 10),
+        onPointerCancel: (_) => _pointerCount = (_pointerCount - 1).clamp(0, 10),
+        behavior: HitTestBehavior.translucent,
         child: KeyedSubtree(
           key: _key,
           child: widget.child,
@@ -157,9 +150,22 @@ class _PinchToZoomState extends State<PinchToZoom>
   }
 }
 
-// ---------------------------------------------------------------------------
-// Overlay widget — floats above everything and renders the zoomed image
-// ---------------------------------------------------------------------------
+// Only wins the gesture arena when 2+ fingers are down.
+// Single-finger drags pass through to PageView and ScrollView.
+class _ConditionalScaleRecognizer extends ScaleGestureRecognizer {
+  final int Function() pointerCountProvider;
+
+  _ConditionalScaleRecognizer({required this.pointerCountProvider});
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    if (pointerCountProvider() >= 2) {
+      resolve(GestureDisposition.accepted);
+    }
+  }
+}
+
 class _ZoomOverlayWidget extends StatelessWidget {
   final Rect rect;
   final double scale;
@@ -176,10 +182,8 @@ class _ZoomOverlayWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dimAmount = ((scale - 1.0) / 5.0).clamp(0.0, 0.88);
-
     return Stack(
       children: [
-        // Dimming backdrop
         Positioned.fill(
           child: IgnorePointer(
             child: ColoredBox(
@@ -187,7 +191,6 @@ class _ZoomOverlayWidget extends StatelessWidget {
             ),
           ),
         ),
-        // The zoomed image, anchored to its original position
         Positioned(
           left: rect.left + offset.dx,
           top: rect.top + offset.dy,

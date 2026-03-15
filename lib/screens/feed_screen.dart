@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import '../providers/feed_provider.dart';
 import '../widgets/post_card.dart';
 import '../widgets/shimmer_feed.dart';
@@ -56,7 +58,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              _TopBar(),
+              const _TopBar(),
               const Divider(height: 0.5, thickness: 0.5),
               Expanded(child: _FeedBody(scrollController: _scrollController)),
             ],
@@ -68,65 +70,104 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// Top navigation bar
+// Top navigation bar — matches Instagram layout exactly:
+// [camera icon]   Graminsta (cursive)   [send/DM icon]
 // ---------------------------------------------------------------------------
-class _TopBar extends ConsumerWidget {
+class _TopBar extends StatelessWidget {
+  const _TopBar();
+
+  Future<void> _openCamera(BuildContext context) async {
+    final picker = ImagePicker();
+    try {
+      final XFile? photo = await picker.pickImage(source: ImageSource.camera);
+      if (photo == null) return; // user cancelled
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).removeCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Photo captured: \${photo.name}',
+                style: const TextStyle(fontSize: 13.5)),
+            behavior: SnackBarBehavior.floating,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 3),
+            margin: const EdgeInsets.all(16),
+            backgroundColor: const Color(0xFF262626),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).removeCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Camera not available on this device',
+                style: TextStyle(fontSize: 13.5)),
+            behavior: SnackBarBehavior.floating,
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 3),
+            margin: const EdgeInsets.all(16),
+            backgroundColor: const Color(0xFF262626),
+          ),
+        );
+      }
+    }
+  }
+
+  void _openDM(BuildContext context) {
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Messages coming soon',
+            style: TextStyle(fontSize: 13.5)),
+        behavior: SnackBarBehavior.floating,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.all(16),
+        backgroundColor: const Color(0xFF262626),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconColor = isDark ? Colors.white : Colors.black;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: [
-          // Instagram wordmark – using styled text as close as possible
-          Image.asset(
-            'assets/logo.jpg',
-            height: 32,
-            fit: BoxFit.contain,
-          ),
-          const Spacer(),
-          // Notification bell
+          // Camera icon — left side
           GestureDetector(
-            onTap: () {
-              ScaffoldMessenger.of(context).removeCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Notifications coming soon',
-                      style: TextStyle(fontSize: 13.5)),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  duration: const Duration(seconds: 3),
-                  margin: const EdgeInsets.all(16),
-                  backgroundColor: const Color(0xFF262626),
-                ),
-              );
-            },
-            child: const Padding(
-              padding: EdgeInsets.all(6),
-              child: Icon(Icons.favorite_border, size: 26),
+            onTap: () => _openCamera(context),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Icon(Icons.camera_alt_outlined, size: 27, color: iconColor),
             ),
           ),
-          const SizedBox(width: 4),
-          // Messenger icon
-          GestureDetector(
-            onTap: () {
-              ScaffoldMessenger.of(context).removeCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Messages coming soon',
-                      style: TextStyle(fontSize: 13.5)),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  duration: const Duration(seconds: 3),
-                  margin: const EdgeInsets.all(16),
-                  backgroundColor: const Color(0xFF262626),
+          // Centered cursive wordmark
+          Expanded(
+            child: Center(
+              child: Text(
+                'Graminsta',
+                style: GoogleFonts.pacifico(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w400,
+                  color: iconColor,
+                  letterSpacing: 0.3,
                 ),
-              );
-            },
-            child: const Padding(
-              padding: EdgeInsets.all(6),
-              child: Icon(Icons.send_outlined, size: 24),
+              ),
+            ),
+          ),
+          // DM / Send icon — right side
+          GestureDetector(
+            onTap: () => _openDM(context),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Icon(Icons.send_outlined, size: 25, color: iconColor),
             ),
           ),
         ],
