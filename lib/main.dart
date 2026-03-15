@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/feed_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   runApp(
@@ -23,7 +24,7 @@ class GraminstaApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
-      home: const FeedScreen(),
+      home: const SplashScreen(),
     );
   }
 

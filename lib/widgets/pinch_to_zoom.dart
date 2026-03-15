@@ -2,10 +2,10 @@
 
 import 'package:flutter/material.dart';
 
-/// PinchToZoom renders [child] normally.
-/// When the user pinches, it creates a hero-style overlay on top of the entire
-/// screen that shows the image scaling smoothly. On release, it animates back
-/// with a spring curve and the overlay fades out.
+/// PinchToZoom wraps any widget and allows pinch-to-zoom using an Overlay.
+/// When the user starts pinching, a full-screen overlay captures the gesture
+/// and renders the scaled image above all other UI. On release, it springs
+/// back with an elastic animation and the overlay is removed.
 class PinchToZoom extends StatefulWidget {
   final Widget child;
 
@@ -17,54 +17,58 @@ class PinchToZoom extends StatefulWidget {
 
 class _PinchToZoomState extends State<PinchToZoom>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-  late Animation<Offset> _offsetAnimation;
+  late AnimationController _animController;
+  late Animation<double> _scaleAnim;
+  late Animation<Offset> _offsetAnim;
 
   OverlayEntry? _overlayEntry;
-  final GlobalKey _childKey = GlobalKey();
+  final GlobalKey _key = GlobalKey();
 
   double _scale = 1.0;
-  double _previousScale = 1.0;
+  double _baseScale = 1.0;
   Offset _offset = Offset.zero;
-  Offset _previousOffset = Offset.zero;
+  Offset _baseOffset = Offset.zero;
   bool _isZooming = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 350),
     );
   }
 
   @override
   void dispose() {
     _removeOverlay();
-    _controller.dispose();
+    _animController.dispose();
     super.dispose();
   }
 
   // ---------------------------------------------------------------------------
-  // Overlay management
+  // Get the widget's bounding rect in global coordinates
   // ---------------------------------------------------------------------------
-  void _showOverlay(Offset initialOffset, Size size) {
-    _removeOverlay();
+  Rect _getGlobalRect() {
+    final rb = _key.currentContext?.findRenderObject() as RenderBox?;
+    if (rb == null) return Rect.zero;
+    final pos = rb.localToGlobal(Offset.zero);
+    return pos & rb.size;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Overlay helpers
+  // ---------------------------------------------------------------------------
+  void _insertOverlay(Rect rect) {
     _overlayEntry = OverlayEntry(
-      builder: (context) => _ZoomOverlay(
+      builder: (_) => _ZoomOverlayWidget(
+        rect: rect,
         scale: _scale,
         offset: _offset,
         child: widget.child,
-        childSize: size,
-        childOffset: initialOffset,
       ),
     );
-    Overlay.of(context).insert(_overlayEntry!);
-  }
-
-  void _updateOverlay() {
-    _overlayEntry?.markNeedsBuild();
+    Overlay.of(context, rootOverlay: true).insert(_overlayEntry!);
   }
 
   void _removeOverlay() {
@@ -73,127 +77,130 @@ class _PinchToZoomState extends State<PinchToZoom>
   }
 
   // ---------------------------------------------------------------------------
-  // Get position of [_childKey] on screen
+  // Gesture callbacks
   // ---------------------------------------------------------------------------
-  (Offset, Size) _getChildRect() {
-    final renderBox =
-    _childKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return (Offset.zero, Size.zero);
-    final offset = renderBox.localToGlobal(Offset.zero);
-    return (offset, renderBox.size);
+  void _onScaleStart(ScaleStartDetails d) {
+    // Only activate on a true pinch (2 fingers)
+    if (d.pointerCount < 2) return;
+
+    _animController.stop();
+    _baseScale = _scale;
+    _baseOffset = _offset;
+    _isZooming = true;
+
+    final rect = _getGlobalRect();
+    if (rect == Rect.zero) return;
+
+    if (_overlayEntry == null) {
+      _insertOverlay(rect);
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // Gesture handlers
-  // ---------------------------------------------------------------------------
-  void _onScaleStart(ScaleStartDetails details) {
-    if (details.pointerCount < 2) return;
-    setState(() => _isZooming = true);
-    _previousScale = _scale;
-    _previousOffset = _offset;
-    final (offset, size) = _getChildRect();
-    _showOverlay(offset, size);
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
+  void _onScaleUpdate(ScaleUpdateDetails d) {
     if (!_isZooming) return;
-    setState(() {
-      _scale = (_previousScale * details.scale).clamp(1.0, 5.0);
-      _offset = _previousOffset + details.focalPointDelta;
-    });
+
+    _scale = (_baseScale * d.scale).clamp(1.0, 6.0);
+    _offset = _baseOffset + d.focalPointDelta;
     _overlayEntry?.markNeedsBuild();
   }
 
-  void _onScaleEnd(ScaleEndDetails details) {
+  void _onScaleEnd(ScaleEndDetails d) {
     if (!_isZooming) return;
+    _isZooming = false;
 
-    final targetScale = 1.0;
-    final targetOffset = Offset.zero;
+    // Animate scale back to 1 and offset back to zero
+    final startScale = _scale;
+    final startOffset = _offset;
 
-    _scaleAnimation = Tween<double>(begin: _scale, end: targetScale).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    _scaleAnim = Tween<double>(begin: startScale, end: 1.0).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.elasticOut),
     );
-    _offsetAnimation =
-        Tween<Offset>(begin: _offset, end: targetOffset).animate(
-          CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-        );
+    _offsetAnim = Tween<Offset>(
+      begin: startOffset,
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
+    );
 
-    _controller.forward(from: 0).then((_) {
+    void listener() {
+      _scale = _scaleAnim.value;
+      _offset = _offsetAnim.value;
+      _overlayEntry?.markNeedsBuild();
+    }
+
+    _animController.addListener(listener);
+    _animController.forward(from: 0).then((_) {
+      _animController.removeListener(listener);
       _removeOverlay();
-      setState(() {
-        _isZooming = false;
-        _scale = 1.0;
-        _offset = Offset.zero;
-      });
-    });
-
-    _controller.addListener(() {
-      if (_overlayEntry != null) {
-        _scale = _scaleAnimation.value;
-        _offset = _offsetAnimation.value;
-        _overlayEntry?.markNeedsBuild();
-      }
+      _scale = 1.0;
+      _offset = Offset.zero;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onScaleStart: _onScaleStart,
-      onScaleUpdate: _onScaleUpdate,
-      onScaleEnd: _onScaleEnd,
-      child: KeyedSubtree(
-        key: _childKey,
-        child: widget.child,
+    return Listener(
+      // Listener ensures we see pointer events even inside a ScrollView
+      onPointerDown: (_) {},
+      child: GestureDetector(
+        onScaleStart: _onScaleStart,
+        onScaleUpdate: _onScaleUpdate,
+        onScaleEnd: _onScaleEnd,
+        // behavior: opaque so the gesture arena picks this up reliably
+        behavior: HitTestBehavior.opaque,
+        child: KeyedSubtree(
+          key: _key,
+          child: widget.child,
+        ),
       ),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// The overlay that renders on top of everything while zooming
+// Overlay widget — floats above everything and renders the zoomed image
 // ---------------------------------------------------------------------------
-class _ZoomOverlay extends StatelessWidget {
+class _ZoomOverlayWidget extends StatelessWidget {
+  final Rect rect;
   final double scale;
   final Offset offset;
   final Widget child;
-  final Size childSize;
-  final Offset childOffset;
 
-  const _ZoomOverlay({
+  const _ZoomOverlayWidget({
+    required this.rect,
     required this.scale,
     required this.offset,
     required this.child,
-    required this.childSize,
-    required this.childOffset,
   });
 
   @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          // Dim background
-          Positioned.fill(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 100),
-              color:
-              Colors.black.withOpacity(((scale - 1) / 4).clamp(0.0, 0.85)),
+    final dimAmount = ((scale - 1.0) / 5.0).clamp(0.0, 0.88);
+
+    return Stack(
+      children: [
+        // Dimming backdrop
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ColoredBox(
+              color: Colors.black.withOpacity(dimAmount),
             ),
           ),
-          // Zoomed image positioned at its original screen coordinates
-          Positioned(
-            left: childOffset.dx + offset.dx,
-            top: childOffset.dy + offset.dy,
-            width: childSize.width,
-            height: childSize.height,
+        ),
+        // The zoomed image, anchored to its original position
+        Positioned(
+          left: rect.left + offset.dx,
+          top: rect.top + offset.dy,
+          width: rect.width,
+          height: rect.height,
+          child: IgnorePointer(
             child: Transform.scale(
               scale: scale,
               child: child,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

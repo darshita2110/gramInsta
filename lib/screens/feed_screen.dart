@@ -78,17 +78,10 @@ class _TopBar extends ConsumerWidget {
       child: Row(
         children: [
           // Instagram wordmark – using styled text as close as possible
-          Text(
-            'Graminsta',
-            style: TextStyle(
-              fontFamily: 'Georgia',
-              fontSize: 24,
-              fontWeight: FontWeight.w400,
-              letterSpacing: -0.5,
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white
-                  : Colors.black,
-            ),
+          Image.asset(
+            'assets/logo.jpg',
+            height: 32,
+            fit: BoxFit.contain,
           ),
           const Spacer(),
           // Notification bell
